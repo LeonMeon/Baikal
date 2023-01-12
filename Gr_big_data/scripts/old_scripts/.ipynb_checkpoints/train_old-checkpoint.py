@@ -1,7 +1,3 @@
-#from scripts.loaders import make_set_E, make_set_polar, make_set_vec
-#from scripts.v_to_angle import xy_to_angles, xyz_to_angles
-#from scripts.plots_hists_angle import loss_plot, lnE_hists
-#from scripts.infos import paz_show_info , p_show_info, lnE_show_info
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -400,3 +396,62 @@ def fit_E(model, scheduler_Exp, optimizer, device, exp_name,
     
     return  big_list
 
+'''
+def train_CNN(model, scheduler_Exp, optimizer, device,
+        train_size = 1365465, tr_set_len = 102400,
+        min_angle = 10. ,max_angle = 60.0,
+        train_loss = None, test_loss = None,
+        epochs_num = 25, batch_size = 64,
+        criterion=torch.nn.L1Loss(),
+        exp_path = None):
+        
+    if train_loss is None: train_loss = []
+    if test_loss is None: test_loss = []
+
+    if pretrained_folder is not None:
+        model.load_state_dict(torch.load(f'{pretrained_folder}/model.pth'))
+        optimizer.load_state_dict(torch.load(f'{pretrained_folder}/opt.pth'))
+          
+    seq = [j for j in range(int( train_size / tr_set_len))]
+    testLoader = make_set_polar(0, -1, 1, Batch_size = batch_size, regime = "val")
+    
+    for n in tqdm(range(1, epochs_num+1)):
+        loss_all, count = 0, 0
+        #training
+        model.train()
+        print('Indeed Epoch = ', n, end = "     ")
+        for i in seq:          
+            train_Loader = make_set_polar(i, 1, tr_set_len, Batch_size = batch_size, regime = "train")
+            for x_batch,y_batch in train_Loader:
+                optimizer.zero_grad()
+                outp = model(x_batch.to(device).float())
+                loss = criterion(outp,y_batch.to(device).float())
+                loss.backward()
+                optimizer.step()
+
+                loss_all += loss.item() 
+                count += 1
+                            
+        train_loss.append(loss_all / count)
+
+        model.eval()        
+        loss_all, count = 0, 0
+        
+        for x_test_batch, y_test_batch in testLoader:
+            outp = model(x_test_batch.to(device).float())
+            loss_all +=  criterion(outp, y_test_batch.to(device).float()).item()
+            count += 1
+        test_loss.append(loss_all / count)
+        model.train()
+
+        scheduler_Exp.step()
+        
+    model.eval()
+    
+
+    if exp_path is not None:
+        make_fold_structure(exp_path = exp_path)
+        save_states(model = model, optimizer = optimizer, exp_path = exp_path)
+        
+    return train_loss, test_loss 
+'''

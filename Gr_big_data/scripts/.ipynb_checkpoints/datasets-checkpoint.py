@@ -30,7 +30,7 @@ class Dataset_Polar_Azimut(InMemoryDataset):
     # returns the save file name required by the process method 。 the name of the dataset you saved later is the same as that in the list 
     @property
     def processed_file_names(self):
-        start = '/home/leonov/Baikal/Gr_big_data/graphs/all_data/processed/'
+        start = '/home/leonov/Baikal/Gr_big_data/datasets/all_data/processed/'
         return [f'{start}/all_data.pt']
         #return [f'{start}/{regime}_data.pt' for regime in ['train','test','val']]
     

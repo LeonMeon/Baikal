@@ -4,6 +4,15 @@ from torch.nn.functional import normalize
 import torch
 from resolution import *
 
+'''
+
+for x_test_batch, y_test_batch in FinalLoader:
+    outp = model(x_test_batch.to(device).float())
+    xy_to_angles(Predicted = outp, Real = y_test_batch.to(device), I_want_scatter_plot = True,
+                p_hist = val_p, p_error_hist = val_p_error,
+                p_error_angle_cut_hist = val_p_error_cut,
+                min_angle = min_angle, max_angle = max_angle)
+'''
 
 def xy_to_angles(Predicted, Real,
                 p_hist, p_error_hist,
@@ -25,28 +34,7 @@ def xy_to_angles(Predicted, Real,
             p_error_angle_cut_hist[round(abs((pol_pred-pol_real).item()),1)] += 1
         p_hist[pol_pred.short().item()] += 1
 
-'''
-With scatter plot
-def v_to_angles( Predicted, Real,
-                p_hist, p_error_hist,
-                p_error_angle_cut_hist, I_want_scatter_plot = False,
-                min_angle = 10., max_angle = 60.): 
-    v_pred = normalize(Predicted.detach()) # нормализую
-    polar_predicted = torch.acos(v_pred[:,-1])/(np.pi)*180 
-    polar_real = torch.acos(Real[:,-1])/(np.pi)*180 
-    if I_want_scatter_plot:
-        plt.scatter(polar_real.cpu().detach().numpy(),polar_predicted.cpu().detach().numpy(), s=1 ,color = "blue",alpha =0.3 )
-        plt.xlabel("Real polar angle", fontsize = 25);plt.ylabel("Predicted polar angle", fontsize = 25)
-        plt.title("Scatter plot for polar angle", fontsize = 30)
-    for pol_pred, pol_real in zip(polar_predicted, polar_real):
-        p_error_hist[round(abs((pol_pred-pol_real).item()),1)] += 1
-        # for certain angles !!!!!!!!!!!!!!!!!!!!!!!
-        if (pol_real.item() >= min_angle) and (pol_real.item() <= max_angle): 
-            p_error_angle_cut_hist[round(abs((pol_pred-pol_real).item()),1)] += 1
-        p_hist[pol_pred.short().item()] += 1
-'''
-
-        
+               
 def xyz_to_angles(Predicted, Real, ones_torch,
                 p_hist, az_hist, 
                 p_error_hist_az,

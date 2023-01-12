@@ -143,3 +143,50 @@ class Dense_Block(torch.nn.Module):
             
     def forward(self, inputs):
         return  self.dense_block(inputs) 
+    
+#############################################################################3
+class SEBlock(torch.nn.Module):
+    '''
+    https://arxiv.org/pdf/1709.01507.pdf
+    
+    In short, it's attention in CNN
+    
+    Use global pooling and NN to get weight of each channel
+    
+    Understand the importance of each feature map in the stack of all the feature maps  after a convolution 
+    and recalibrates that output to reflect that importance before passing the volume to the next layer.
+    '''
+    def __init__(self, out_channels, reduction_ratio):
+        super().__init__()
+        
+        if out_channels < reduction_ratio :
+            reduction_ratio = out_channels
+            
+        # Global pooling
+        # mb use meanpool
+        def _squeeze(x) :
+            return max_pool3d(x, kernel_size=x.shape[2:])
+        
+        def _scaling(x, scale) :
+            reps  = list(x.shape)
+            reps[0] = reps[1] = 1
+            scale.repeat(reps)
+            x = x * scale
+            return x
+
+        self.squeeze = _squeeze
+        self.scaling = _scaling
+        #use an attention mechanism using a gating network
+        self.excitation = torch.nn.Sequential(
+            torch.nn.Linear(out_channels, out_channels // reduction_ratio),
+            torch.nn.ReLU(),
+            torch.nn.Linear(out_channels // reduction_ratio, out_channels),
+            torch.nn.Sigmoid()
+        )
+        
+    def forward(self, x):
+        scale = self.squeeze(x)
+        scale = self.excitation(scale.squeeze())
+        scale = torch.reshape(scale, scale.shape)
+        x = self.scaling(x, scale)        
+        return x
