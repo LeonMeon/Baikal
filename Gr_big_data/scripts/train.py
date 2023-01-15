@@ -1,8 +1,10 @@
+import copy
 import torch
 import torch.nn.functional as F
+from torch.utils.data import ConcatDataset, TensorDataset, DataLoader
 from tqdm import tqdm
 import numpy as np
-from os import mkdir
+from os import mkdir, makedirs
 
 #from vizualize import *
 #from loaders import make_set_E, make_set_polar, make_set_vec
@@ -17,12 +19,43 @@ def save_states(model, optimizer, exp_path):
     torch.save(model.state_dict(), f"{exp_path}/States/model")
     torch.save(optimizer.state_dict(), f"{exp_path}/States/opt")
 
+def cross_val_CNN(model, device, train_loader,
+                  learn_rate = 3e-3, folds = 5,epochs_num = 40,
+                  criterion=torch.nn.L1Loss(), exp_path = None):
+    makedirs(exp_path, exist_ok=True)
+    # TODO: shuffle data
+    batch_size = train_loader.batch_size
+    ds = train_loader.dataset
+    data, target = ds.tensors
+    ds_len = len(ds)
+    fold_size = ds_len // folds
+    
+    for i in range(folds):
+        start, end = fold_size * i , fold_size * (i + 1)
+        
+        train_data, train_target = torch.cat([data[:start],data[end:]]), torch.cat([target[:start],target[end:]])
+        val_data, val_target =  data[start:end], target[start:end]
+        
+        train_dataset, val_dataset = TensorDataset(train_data, train_target), TensorDataset(val_data, val_target )
+        
+        train_loader = DataLoader(dataset = train_dataset, batch_size = batch_size)    
+        val_loader = DataLoader(dataset = val_dataset, batch_size = batch_size) 
+        
+        model_CV = copy.deepcopy(model)
+        optimizer_CV = torch.optim.Adam(model_CV.parameters(), lr = learn_rate)
+        scheduler_CV = torch.optim.lr_scheduler.ExponentialLR(optimizer_CV, gamma = 0.95)
+        
+        
+        train_CNN(model_CV, scheduler_CV, optimizer_CV, device, 
+                  train_loader, val_loader,
+                  epochs_num = epochs_num, criterion = criterion,
+                  exp_path = f'{exp_path}/CV{i}')   
 #######################################################################################################################
 #"/home/leonov/Baikal/Gr_big_data/exps/Polar"
 def train_CNN(model, scheduler, optimizer, device,
             train_loader, test_loader,
             train_loss = None, test_loss = None,
-            epochs_num = 25, criterion=torch.nn.L1Loss(),
+            epochs_num = 40, criterion=torch.nn.L1Loss(),
             pretrained_folder = None, exp_path = None):
         
     if train_loss is None: train_loss = []

@@ -62,7 +62,7 @@ def resolution_hist(resolution, x_min = 0.0, x_max = 15, title = ''):
     plt.xlim(left = x_min, right=x_max) 
     plt.title(f"{title} Resolution Distribution", fontsize= 30)
     plt.legend(fontsize = LEGEND_SIZE)   
-
+    return med
     
 def angle_hist(true, predict, title = ''):
     title = title.title()
@@ -81,11 +81,13 @@ def scatter_plot(true, predict, title = '', r2 = None):
     plt.ylabel(f'Predicted {title}', fontsize = 25)
     if r2 != None:
         plt.title(f'{title} Scatter Plot \n R2 = {round(r2,3)}', fontsize = 30) 
+        return r2
     else:
         plt.title(f'{title} Scatter Plot', fontsize = 30)     
         
     
-def CNN_Info(model, loader, regime = "test", path = None):
+def CNN_Info(model, loader, regime = "test", path = None, show = True):
+    record = {}
     _device = next(model.parameters()).device
     pol_pred_list, pol_true_list = torch.tensor([]), torch.tensor([]), 
     az_pred_list, az_true_list = torch.tensor([]), torch.tensor([])
@@ -124,11 +126,13 @@ def CNN_Info(model, loader, regime = "test", path = None):
     
     # polar  resolution
     plt.subplot(rows, 3, 1)
-    resolution_hist(resolution = pol_res_list, title = f'{regime} polar', x_max = 15)
+    polar_med = resolution_hist(resolution = pol_res_list, title = f'{regime} polar', x_max = 15)
+    record['polar_med'] = polar_med
     # polar scatter
     plt.subplot(rows, 3, 2)
-    scatter_plot(true = pol_true_list, predict = pol_pred_list, title = f'{regime} polar',
+    polar_r2 =scatter_plot(true = pol_true_list, predict = pol_pred_list, title = f'{regime} polar',
                  r2 = r2_score(pol_true_list, pol_pred_list))
+    record['polar_r2'] = polar_r2
     # polar distribution
     plt.subplot(rows, 3, 3)
     angle_hist(true = pol_true_list, predict = pol_pred_list, title = f'{regime} polar')
@@ -136,7 +140,8 @@ def CNN_Info(model, loader, regime = "test", path = None):
     if rows == 3: 
         # azimut  resolution
         plt.subplot(rows, 3, 4)
-        resolution_hist(resolution = az_res_list, title = f'{regime} azimut', x_max = 45)
+        azimut_res = resolution_hist(resolution = az_res_list, title = f'{regime} azimut', x_max = 45)
+        record['azimut_res'] = azimut_res
         # azimut scatter
         plt.subplot(rows, 3, 5)
         scatter_plot(true = az_true_list, predict = az_pred_list, title = f'{regime} azimut')
@@ -145,11 +150,16 @@ def CNN_Info(model, loader, regime = "test", path = None):
         angle_hist(true = az_true_list, predict = az_pred_list, title = f'{regime} azimut')
         # direction  resolution
         plt.subplot(rows, 3, 8)
-        resolution_hist(resolution = resolution_list, title = f'{regime} direction', x_max = 15)    
+        direction_res = resolution_hist(resolution = resolution_list, title = f'{regime} direction', x_max = 15)
+        record['direction_res'] = direction_res
     
     if path != None:
         plt.savefig(path)
-    plt.show()              
+    if not show:
+        plt.close()
+    else:
+        plt.show()  
+    return record
     
 
 def GNN_Info(model, loader, regime = "train"):
