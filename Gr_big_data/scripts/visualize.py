@@ -6,8 +6,15 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 from torch.nn.functional import cosine_similarity, normalize
 
-LEGEND_SIZE =  15
+LEGEND_SIZE = 20
+TITLE_SIZE = 30
+LABEL_SIZE = 20
+TICKS_SIZE = 20
 
+plt.rcParams.update({'font.size': 20})
+METRICS = ['polar_res', 'polar_r2', 'azimut_res', 'direction_res']
+ 
+###########################################################                       ###########################################################
 def outp_to_res_and_angles(predict, true): 
     v_pred = normalize(predict.detach()) # нормализую    
     p_true = torch.acos(true[:,-1]) * 180 / np.pi  
@@ -32,21 +39,26 @@ def outp_to_res_and_angles(predict, true):
     else:
         raise Exception("Strange output, it should be 2 or 3 dim vector")
 
+##############################################   loss_plot    #######################################################
 
-def loss_plot(train_loss, test_loss, path ):
+def loss_plot(train_loss, test_loss, path = None, show = True ):
     plt.figure(figsize=(9,6))
     plt.plot(np.arange(len(test_loss)), test_loss, label='test', linewidth=2)
     plt.plot(np.arange(len(train_loss)), train_loss, label='train', linewidth=2)
     
     plt.title('Loss_plot', fontsize = 25)
-    plt.xlabel('iterations', fontsize = 20)
+    plt.xlabel('Epochs', fontsize = 20)
     plt.ylabel('Loss', fontsize = 20)
     plt.legend(fontsize = LEGEND_SIZE)
     
-    plt.savefig(path)
-    plt.show()    
+    plt.savefig(path)   
+    if not show:
+        plt.close()
+    else:
+        plt.show() 
 
-    
+#################################################   resolution_hist  ##############################################
+
 def resolution_hist(resolution, x_min = 0.0, x_max = 15, title = ''):
     title = title.title()
     med, sigm2 = np.quantile(resolution, q = 0.5), np.quantile(resolution, q = 0.68)
@@ -63,7 +75,9 @@ def resolution_hist(resolution, x_min = 0.0, x_max = 15, title = ''):
     plt.title(f"{title} Resolution Distribution", fontsize= 30)
     plt.legend(fontsize = LEGEND_SIZE)   
     return med
-    
+
+####################################################  angle_hist   ################################################# 
+
 def angle_hist(true, predict, title = ''):
     title = title.title()
     plt.hist(true, bins = 100, alpha = 0.2, density = True,
@@ -74,46 +88,178 @@ def angle_hist(true, predict, title = ''):
     plt.title(f"{title} Angle Distribution", fontsize = 25)
     plt.legend(fontsize = LEGEND_SIZE)
 
+##################################################  scatter_plot     #################################################     
+    
 def scatter_plot(true, predict, title = '', r2 = None):
     title = title.title()
     plt.scatter(true, predict, s = 0.1)
     plt.xlabel(f'True {title}', fontsize = 25)
     plt.ylabel(f'Predicted {title}', fontsize = 25)
+    plt.ylim(0,95)
     if r2 != None:
         plt.title(f'{title} Scatter Plot \n R2 = {round(r2,3)}', fontsize = 30) 
         return r2
     else:
         plt.title(f'{title} Scatter Plot', fontsize = 30)     
         
+#################################################   record_plots     #################################################
+
+def metrics_plots(record, path = None, show = False):
+    names = list(record.keys())
+    n = len(names)
+    plt.figure(figsize=(18,6 * n // 2))
+    for i in range(n):
+        plt.subplot(n // 2, 2, i + 1)
+        plt.plot(record[names[i]])
+        plt.title(names[i], fontsize = 25)
+        plt.ylabel(names[i], fontsize = 20)
+        plt.xlabel('Epochs', fontsize = 20)
+    plt.legend(fontsize = LEGEND_SIZE)
     
-def CNN_Info(model, loader, regime = "test", path = None, show = True):
+    if path is not None:
+        plt.savefig(path)   
+    if not show:
+        plt.close()
+    else:
+        plt.show() 
+
+##################################################    make_record_df    #################################################
+
+def make_record_df(records, folds, exp_path = None):
+    cvs = pd.Series([f'CV{i}' for i in range(folds)])
+    df = pd.DataFrame.from_dict(records).set_index(cvs)
+
+    mean, std = df.mean().values, df.std().values
+    df_add = pd.DataFrame([mean, std/mean*100], columns = list(records.keys()), index=['mean', 'std/mean*%'])
+    df = df.append(df_add).round(2)
+    if exp_path is not None:
+        df.to_csv(f'{exp_path}/cv_metrics.csv', sep='\t')
+    return df   
+    
+################################################  metrics_by_angles  ################################################
+    
+def metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
+                      bin_size = 10, angle = 4, path = None, show = False):
+
+    max_bin = 90 // bin_size
+    bins = (np.arange(max_bin) + 0.5) * bin_size
+    inds = pol_true_list // bin_size
+    
+    if angle == 2:
+        plot =  {'med': [],'sigm2': []}   
+        for i in range(max_bin): # don't take into account  last bin, because it starts from 90
+            ids = np.where(inds == i)    
+            pol_res = pol_res_list[ids] 
+            plot['med'].append(  np.quantile(pol_res, q = 0.5 ))
+            plot['sigm2'].append(np.quantile(pol_res, q = 0.68)) 
+
+        plt.figure(figsize = (12,12))
+
+        plt.plot(bins, plot['med'], label = 'med', color = 'blue')
+        plt.plot(bins, plot['sigm2'], label = 'sigm2', color = 'orange')
+
+        plt.legend(fontsize = LEGEND_SIZE)
+        plt.title('Polar', fontsize = TITLE_SIZE)
+        plt.xlabel('Angle bins', fontsize = LABEL_SIZE)
+        plt.ylabel('Resolutions', fontsize = LABEL_SIZE)
+        plt.xticks(np.arange(0,95,5), fontsize = TICKS_SIZE)
+
+    if angle == 4:
+        keys = ['Polar', 'Azimut', 'Direction']
+        plot = { name : {'med': [],'sigm2': []} for name in keys }   
+        for i in range(max_bin): # don't take into account  last bin, because it starts from 90
+            ids = np.where(inds == i)
+            res_s = [ pol_res_list[ids], az_res_list[ids], resolution_list[ids] ] 
+            for k, arr in zip(keys, res_s):
+                plot[k]['med'].append(  np.quantile(arr, q = 0.5 ))
+                plot[k]['sigm2'].append(np.quantile(arr, q = 0.68))
+        plt.figure(figsize = (36,12))
+        for i, k in enumerate(keys):
+            plt.subplot(1,3,i + 1)
+
+            plt.plot(bins, plot[k]['med'], label = 'med', color = 'blue')
+            plt.plot(bins, plot[k]['sigm2'], label = 'sigm2', color = 'orange')
+
+            plt.legend(fontsize = LEGEND_SIZE)
+            plt.title(f"{k} ", fontsize = TITLE_SIZE) #\n {[round(v,2) for v in plot[k]['med'] ]}
+            plt.xlabel('Angle bins', fontsize = LABEL_SIZE)
+            plt.ylabel('Resolutions', fontsize = LABEL_SIZE)
+            plt.xticks(np.arange(0,95,5), fontsize = TICKS_SIZE)
+            
+    if path != None:
+        plt.savefig(path)  
+    if not show:
+        plt.close()
+    else:
+        plt.show()      
+    
+#################################################   CNN_Info     ###################################################
+## TODO: make smth in case of prediction of azimut
+def Model_Info(model, loader, regime = "test", path = None, show = True, bin_size = 10, mode = 'CNN'):
     record = {}
     _device = next(model.parameters()).device
     pol_pred_list, pol_true_list = torch.tensor([]), torch.tensor([]), 
     az_pred_list, az_true_list = torch.tensor([]), torch.tensor([])
     pol_res_list, az_res_list = torch.tensor([]), torch.tensor([])
     resolution_list = torch.tensor([])
+    
     with torch.no_grad():
-        for x_batch, y_batch in tqdm(loader):
-            predict = model(x_batch.to(_device).float()).detach().cpu()
-            resolution, angles = outp_to_res_and_angles(predict, y_batch)  
+        ################################ CNN ###############################
+        if mode == 'CNN':
+            for x_batch, y_batch in loader:
+                predict = model(x_batch.to(_device).float()).detach().cpu()
+                
+                resolution, angles = outp_to_res_and_angles(predict, y_batch)  
 
-            p_predict, p_true = angles[0].squeeze(), angles[1].squeeze()
-            p_res = (p_predict - p_true).abs()
+                p_predict, p_true = angles[0].squeeze(), angles[1].squeeze()
+                p_res = (p_predict - p_true).abs()
 
-            pol_res_list = torch.cat((pol_res_list, p_res), axis = 0)         
-            pol_true_list = torch.cat((pol_true_list, p_true), axis = 0)
-            pol_pred_list = torch.cat((pol_pred_list, p_predict), axis = 0)        
+                pol_res_list = torch.cat((pol_res_list, p_res), axis = 0)         
+                pol_true_list = torch.cat((pol_true_list, p_true), axis = 0)
+                pol_pred_list = torch.cat((pol_pred_list, p_predict), axis = 0)
+                
+                if len(angles) == 4:           
+                    az_predict, az_true = angles[2].squeeze(), angles[3].squeeze()
+                    az_res = (az_predict - az_true).abs()
+                    az_res = torch.where(az_res < 180, az_res, 360 - az_res)
 
-            if len(angles) == 4:           
-                az_predict, az_true = angles[2].squeeze(), angles[3].squeeze()
-                az_res = (az_predict - az_true).abs()
-                az_res = torch.where(az_res < 180, az_res, 360 - az_res)
+                    az_res_list = torch.cat((az_res_list, az_res), axis = 0)  
+                    az_true_list = torch.cat((az_true_list, az_true), axis = 0)
+                    az_pred_list = torch.cat((az_pred_list, az_predict), axis = 0)
+                    resolution_list = torch.cat((resolution_list, resolution), axis = 0)
+                    
+        ################################ GNN ###############################            
+        elif mode == 'GNN':
+            for data in loader:
+                predict = model(data.to(_device).float()).detach().cpu()
+                
+                if predict.shape[1] == 2:
+                    y_batch = data.y_polar.squeeze().cpu() # data.y_azimut.squeeze().cpu()                       
+                elif predict.shape[1] == 3:
+                    y_batch = data.direction.squeeze().cpu()
+                    
+                resolution, angles = outp_to_res_and_angles(predict, y_batch) 
 
-                az_res_list = torch.cat((az_res_list, az_res), axis = 0)  
-                az_true_list = torch.cat((az_true_list, az_true), axis = 0)
-                az_pred_list = torch.cat((az_pred_list, az_predict), axis = 0)
-                resolution_list = torch.cat((resolution_list, resolution), axis = 0)
+                p_predict, p_true = angles[0].squeeze(), angles[1].squeeze()
+                p_res = (p_predict - p_true).abs()
+
+                pol_res_list = torch.cat((pol_res_list, p_res), axis = 0)         
+                pol_true_list = torch.cat((pol_true_list, p_true), axis = 0)
+                pol_pred_list = torch.cat((pol_pred_list, p_predict), axis = 0)
+                
+                if len(angles) == 4:           
+                    az_predict, az_true = angles[2].squeeze(), angles[3].squeeze()
+                    az_res = (az_predict - az_true).abs()
+                    az_res = torch.where(az_res < 180, az_res, 360 - az_res)
+
+                    az_res_list = torch.cat((az_res_list, az_res), axis = 0)  
+                    az_true_list = torch.cat((az_true_list, az_true), axis = 0)
+                    az_pred_list = torch.cat((az_pred_list, az_predict), axis = 0)
+                    resolution_list = torch.cat((resolution_list, resolution), axis = 0)
+                    
+        else:
+            print("Emmmm.... What?")
+
         
     resolution_list = resolution_list.numpy()
     pol_res_list, az_res_list = pol_res_list.numpy(), az_res_list.numpy()   
@@ -153,6 +299,9 @@ def CNN_Info(model, loader, regime = "test", path = None, show = True):
         direction_res = resolution_hist(resolution = resolution_list, title = f'{regime} direction', x_max = 15)
         record['direction_res'] = direction_res
     
+    metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
+                      bin_size = bin_size, angle = rows + 1, path = path, show = show)        
+        
     if path != None:
         plt.savefig(path)
     if not show:
@@ -161,7 +310,7 @@ def CNN_Info(model, loader, regime = "test", path = None, show = True):
         plt.show()  
     return record
     
-
+'''
 def GNN_Info(model, loader, regime = "train"):
     _device = next(model.parameters()).device
     pol_pred_list, pol_true_list, res_list = torch.tensor([]), torch.tensor([]), torch.tensor([])
@@ -181,6 +330,4 @@ def GNN_Info(model, loader, regime = "train"):
     #angle_list = (angle_list / np.pi * 180).detach().numpy()
     pol_pred_list = (pol_pred_list / np.pi * 180).detach().numpy()
     pol_true_list = (pol_true_list / np.pi * 180).detach().numpy()
-        
-    # angle distribution   
-    # scatter plot
+'''

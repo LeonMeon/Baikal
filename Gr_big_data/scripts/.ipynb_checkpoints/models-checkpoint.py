@@ -18,6 +18,7 @@ def ResNet(device, amount = 2, input_size = 5, output_size  = 3):
     print("Parameters amount is ",sum(p.numel() for p in model.parameters()))
     return model.to(device)
 
+
 def ResNet_drop_before(device, amount = 2, input_size = 5, output_size  = 3):
     model= torch.nn.Sequential(    
     Start_Block(input_size),

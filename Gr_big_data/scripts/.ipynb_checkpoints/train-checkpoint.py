@@ -4,67 +4,83 @@ import torch.nn.functional as F
 from torch.utils.data import ConcatDataset, TensorDataset, DataLoader
 from tqdm import tqdm
 import numpy as np
+import pandas as pd
 from os import mkdir, makedirs
+from visualize import *
 
-#from vizualize import *
-#from loaders import make_set_E, make_set_polar, make_set_vec
-#from inference import xy_to_angles, xyz_to_angles
 
 def make_fold_structure(exp_path):
     mkdir(exp_path)
-    for fold_name in  ["Hists", "Plots", "States"]:
-        mkdir(f'{exp_path}/{fold_name}') 
+    for fold_name in  ["Plots", "States"]:
+        makedirs(f'{exp_path}/{fold_name}', exist_ok=True) 
+
         
 def save_states(model, optimizer, exp_path):
     torch.save(model.state_dict(), f"{exp_path}/States/model")
     torch.save(optimizer.state_dict(), f"{exp_path}/States/opt")
 
-def cross_val_CNN(model, device, train_loader,
-                  learn_rate = 3e-3, folds = 5,epochs_num = 40,
-                  criterion=torch.nn.L1Loss(), exp_path = None):
-    makedirs(exp_path, exist_ok=True)
-    # TODO: shuffle data
-    batch_size = train_loader.batch_size
-    ds = train_loader.dataset
-    data, target = ds.tensors
-    ds_len = len(ds)
-    fold_size = ds_len // folds
     
+def cross_val_CNN(model, device, train_loader, #test_loader,
+                  learn_rate = 3e-3, folds = 5, epochs_num = 60,
+                  criterion=torch.nn.L1Loss(), exp_path = None):
+    records = 0
+    makedirs(exp_path, exist_ok=True)
+    batch_size = train_loader.batch_size
+    data, target = train_loader.dataset.tensors
+    fold_size = target.shape[0] // folds
+    
+    plt.figure(figsize = (20,8))
     for i in range(folds):
         start, end = fold_size * i , fold_size * (i + 1)
         
         train_data, train_target = torch.cat([data[:start],data[end:]]), torch.cat([target[:start],target[end:]])
-        val_data, val_target =  data[start:end], target[start:end]
-        
-        train_dataset, val_dataset = TensorDataset(train_data, train_target), TensorDataset(val_data, val_target )
-        
+        val_data, val_target =  data[start:end], target[start:end]        
+        train_dataset, val_dataset = TensorDataset(train_data, train_target), TensorDataset(val_data, val_target)      
         train_loader = DataLoader(dataset = train_dataset, batch_size = batch_size)    
         val_loader = DataLoader(dataset = val_dataset, batch_size = batch_size) 
         
         model_CV = copy.deepcopy(model)
         optimizer_CV = torch.optim.Adam(model_CV.parameters(), lr = learn_rate)
         scheduler_CV = torch.optim.lr_scheduler.ExponentialLR(optimizer_CV, gamma = 0.95)
+                
+        train_loss, test_loss, metrics, record = train_CNN(model_CV, scheduler_CV, optimizer_CV, device, 
+                                                          train_loader, val_loader,
+                                                          epochs_num = epochs_num, criterion = criterion,
+                                                          exp_path = f'{exp_path}/CV{i}')
         
+        if records == 0:
+            records = record
+        else:
+            for k,v in record.items():
+                records[k].append(v)
+                
+        plt.subplot(1,2,1)
+        plt.plot(train_loss, label = f'train CV{i}')
+        plt.subplot(1,2,2)
+        plt.plot(test_loss, label = f'test CV{i}')
         
-        train_CNN(model_CV, scheduler_CV, optimizer_CV, device, 
-                  train_loader, val_loader,
-                  epochs_num = epochs_num, criterion = criterion,
-                  exp_path = f'{exp_path}/CV{i}')   
-#######################################################################################################################
-#"/home/leonov/Baikal/Gr_big_data/exps/Polar"
+    plt.legend(fontsize = 20); plt.title(fontsize = 25)
+    plt.subplot(1,2,1)
+    plt.legend(fontsize = 20); plt.title(fontsize = 25)  
+    plt.savefig(f'{exp_path}/all_losses.png')
+
+    make_record_df(records, folds, exp_path)    
+    return df
+
+
 def train_CNN(model, scheduler, optimizer, device,
             train_loader, test_loader,
-            train_loss = None, test_loss = None,
             epochs_num = 40, criterion=torch.nn.L1Loss(),
-            pretrained_folder = None, exp_path = None):
+            pretrained_folder = None, exp_path = None,
+            show = False):
         
-    if train_loss is None: train_loss = []
-    if test_loss is None: test_loss = []
+    train_loss, test_loss = [], []
+    metrics = {name: [] for name in ['polar_res', 'polar_r2', 'azimut_res', 'direction_res']}
 
     if pretrained_folder is not None:
-        model.load_state_dict(torch.load(f'{pretrained_folder}/model.pth'))
-        optimizer.load_state_dict(torch.load(f'{pretrained_folder}/opt.pth'))
-
+        model.load_state_dict(torch.load(f'{pretrained_folder}/States/model.pth'))
+        optimizer.load_state_dict(torch.load(f'{pretrained_folder}/States/opt.pth'))
+            
     for n in tqdm(range(1, epochs_num+1)):   
         model.train()
         loss_all, count = 0, 0
@@ -76,21 +92,24 @@ def train_CNN(model, scheduler, optimizer, device,
             loss.backward()
             optimizer.step()
             loss_all += loss.item() 
-            count += 1
-            
+            count += 1            
         train_loss.append(loss_all / count)
-
-        model.eval()        
-        loss_all, count = 0, 0
         
-        for x_test_batch, y_test_batch in test_loader:
-            outp = model(x_test_batch.to(device).float())
-            loss_all +=  criterion(outp, y_test_batch.to(device).float()).item()
-            count += 1
-            
+        ############################################## inference ###########################################        
+        model.eval()        
+        loss_all, count = 0, 0        
+        with torch.no_grad():
+            for x_test_batch, y_test_batch in test_loader:
+                outp = model(x_test_batch.to(device).float())
+                loss_all +=  criterion(outp, y_test_batch.to(device).float()).item()
+                count += 1
         test_loss.append(loss_all / count)
+        ########################################## test_metrics_plots ##################################
+        record = CNN_Info(model, test_loader, regime = "test", show = False)
+        for name in record.keys():
+            metrics[name].append(record[name])
+        #######################################################################################################
         model.train()
-
         scheduler.step()
         
     model.eval()
@@ -99,24 +118,32 @@ def train_CNN(model, scheduler, optimizer, device,
         make_fold_structure(exp_path = exp_path)
         save_states(model = model, optimizer = optimizer, exp_path = exp_path)
     
-    np.save(f'{exp_path}/Plots/train_loss.json', train_loss)
-    np.save(f'{exp_path}/Plots/test_loss.json', test_loss)
-    return train_loss, test_loss    
+    ############################################## visualize ##############################################
+    
+    loss_plot(train_loss, test_loss, path = f'{exp_path}/Plots/loss_plots.png', show = show)
+    record = CNN_Info(model, test_loader, regime = "test",
+                      path = f'{exp_path}/Plots/record.png', show = show)
+    metrics_plots(metrics, path = f'{exp_path}/Plots/test_metrics_plots.png', show = show)
+    
+    np.save(f'{exp_path}/Plots/train_loss', train_loss)
+    np.save(f'{exp_path}/Plots/test_loss', test_loss)
+    np.save(f'{exp_path}/Plots/metrics', metrics)
+    np.save(f'{exp_path}/Plots/record', record)
+        
+    return train_loss, test_loss, metrics, record   
 
 #path_begin = "/home/leonov/Baikal/Gr_big_data/exps/Graph",
-def train_graph_model(model: torch.nn.Module, optimizer, device, 
+def train_GNN(model: torch.nn.Module, optimizer, device, 
                          train_loader, test_loader, val_loader,
                          criterion = F.mse_loss,                         
-                         exp_path = None,          
-                         train_loss = None, test_loss = None, val_loss = None,
+                         exp_path = None, 
                          pretrained_folder = None,
                          show = True, 
                          epochs = 20):
     
-    if train_loss is None: train_loss = []
-    if test_loss is None: test_loss = []
-    if val_loss is None: val_loss = []
-
+    train_loss, test_loss, val_loss = [], [], []
+    metrics = {name: [] for name in ['polar_res', 'polar_r2', 'azimut_res', 'direction_res']}
+    
     if pretrained_folder is not None:
         model.load_state_dict(torch.load(f'{pretrained_folder}/model.pth'))
         optimizer.load_state_dict(torch.load(f'{pretrained_folder}/opt.pth'))
@@ -141,7 +168,7 @@ def train_graph_model(model: torch.nn.Module, optimizer, device,
         train_loss.append(loss_all)
         return loss_all 
 
-    def test(loader,loss_list):
+    def test(loader, loss_list):
         model.eval()
         error = 0
 
@@ -159,6 +186,9 @@ def train_graph_model(model: torch.nn.Module, optimizer, device,
         lr = scheduler.optimizer.param_groups[0]['lr']
         train_error = train()
         test_error = test(test_loader, test_loss)
+        # TO DO: inference
+        
+        # TO DO: inference
         scheduler.step(test_error)
         
         if best_val_error is None or val_error <= best_val_error:
@@ -169,13 +199,6 @@ def train_graph_model(model: torch.nn.Module, optimizer, device,
         print(f'Epoch: {epoch:03d}, LR: {lr:7f}, Train Loss: {train_error:.7f}, '
               f'Val Loss: {val_error:.7f}, Test Loss: {test_error:.7f}')
         
-        '''
-        if epoch == epochs - 1:
-            print("Printing resolution hists and angle distribution for train...  ")
-            polar_vec_res_hist(model, device, train_loader, regime = "train")
-            print("Printing resolution hists and angle distribution for test...  ")
-            polar_vec_res_hist(model, device, test_loader, regime = "test")
-        '''
     if exp_path is not None:
         make_fold_structure(exp_path)
         save_states(model, optimizer, exp_path)
@@ -186,19 +209,28 @@ def train_graph_model(model: torch.nn.Module, optimizer, device,
     plt.plot(test_loss, label='test', linewidth=2)
     plt.plot(val_loss, label='val', linewidth=2)
     
-    plt.title('Loss_plot')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
+    plt.title('Loss_plot'); plt.xlabel('Epochs'); plt.ylabel('Loss')
     plt.legend()
     
     plt.savefig(f'{exp_path}/Plots/loss.png' )
     plt.show() 
+    
+    '''
+    record = GNN_Info(model, test_loader, regime = "test",
+                      path = f'{exp_path}/Plots/record.png', show = show)
+    metrics_plots(metrics, path = f'{exp_path}/Plots/test_metrics_plots.png', show = show)
+    
+    np.save(f'{exp_path}/Plots/train_loss', train_loss)
+    np.save(f'{exp_path}/Plots/test_loss', test_loss)
+    np.save(f'{exp_path}/Plots/metrics', metrics)
+    np.save(f'{exp_path}/Plots/record', record)
+    '''
     return train_loss, test_loss, val_loss
 
 
 
 ##############################################################################################################
-#"/home/leonov/Baikal/Gr_big_data/exps/Energy"
+'''
 def fit_E(model, scheduler_Exp, optimizer, device,
         epochs_num = 25, batch_size = 64, tr_set_len = 2 * 512 * 100,
         criterion = torch.nn.L1Loss(),
@@ -279,4 +311,4 @@ def fit_E(model, scheduler_Exp, optimizer, device,
     print('big_list = [[loss_train,loss_test], [train_lnE, val_lnE] ]')
     
     return  big_list
-
+'''
