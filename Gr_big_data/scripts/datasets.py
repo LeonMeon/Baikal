@@ -74,12 +74,20 @@ class Dataset_Polar_Azimut(InMemoryDataset):
             x = torch.FloatTensor(hf[regime + '/data/'][ind,:n_nodes])
             polar = torch.FloatTensor([hf[regime + '/ev_chars'][ind,0] * (np.pi) / 180])[None,:]
             azimut = torch.FloatTensor([hf[regime + '/ev_chars'][ind,1] * (np.pi) / 180])[None,:]
+            # only polar
             y_polar = torch.cat((torch.sin(polar), torch.cos(polar)), axis=1)
+            # only azimut
             y_azimut = torch.cat((torch.sin(azimut), torch.cos(azimut)), axis=1)
+            # direction vector
+            v_x = np.expand_dims(np.sin(polar) * np.cos(azimut), axis=1)
+            v_y = np.expand_dims(np.sin(polar) * np.sin(azimut), axis=1)
+            v_z = np.expand_dims(np.cos(polar), axis=1)
+            direction = torch.FloatTensor(np.concatenate((v_x, v_y, v_z), axis=1))
 
         return Data(x = x, edge_index = edge_indexes,
                     polar = polar, azimut = azimut,
-                    y_polar = y_polar, y_azimut = y_azimut)  
+                    y_polar = y_polar, y_azimut = y_azimut,
+                    direction = direction)  
     
     # the method used to generate the dataset 
     def process(self):
