@@ -7,10 +7,10 @@ import numpy as np
 import pandas as pd
 from os import mkdir, makedirs
 from visualize import *
-
+from torch_geometric.nn import global_mean_pool
 
 def make_fold_structure(exp_path):
-    mkdir(exp_path)
+    makedirs(exp_path,exist_ok=True)
     for fold_name in  ["Plots", "States"]:
         makedirs(f'{exp_path}/{fold_name}', exist_ok=True) 
 
@@ -21,17 +21,18 @@ def save_states(model, optimizer, exp_path):
 
     
 def cross_val_CNN(model, device, train_loader, #test_loader,
-                  learn_rate = 3e-3, folds = 5, epochs_num = 60,
+                  learn_rate = 3e-3, epochs_num = 60,
+                  folds_partition = 5, folds_to_train = 3,
                   criterion=torch.nn.L1Loss(), exp_path = None):
     records = 0
     makedirs(exp_path, exist_ok=True)
     batch_size = train_loader.batch_size
     data, target = train_loader.dataset.tensors
-    fold_size = target.shape[0] // folds
+    fold_size = target.shape[0] // folds_partition
     
     plt.figure(figsize = (20,8))
-    for i in range(folds):
-        start, end = fold_size * i , fold_size * (i + 1)
+    for i in range(folds_to_train):
+        start, end = fold_size * i, fold_size * (i + 1)
         
         train_data, train_target = torch.cat([data[:start],data[end:]]), torch.cat([target[:start],target[end:]])
         val_data, val_target =  data[start:end], target[start:end]        
@@ -49,7 +50,7 @@ def cross_val_CNN(model, device, train_loader, #test_loader,
                                                           exp_path = f'{exp_path}/CV{i}')
         
         if records == 0:
-            records = record
+            records = {k: [v] for k,v in record.items()} # make the same, but value is a list
         else:
             for k,v in record.items():
                 records[k].append(v)
@@ -59,12 +60,14 @@ def cross_val_CNN(model, device, train_loader, #test_loader,
         plt.subplot(1,2,2)
         plt.plot(test_loss, label = f'test CV{i}')
         
-    plt.legend(fontsize = 20); plt.title(fontsize = 25)
+        
+
+    plt.legend(fontsize = 20); plt.title('CV train losses',fontsize = 25)
     plt.subplot(1,2,1)
-    plt.legend(fontsize = 20); plt.title(fontsize = 25)  
+    plt.legend(fontsize = 20); plt.title('CV test losses',fontsize = 25)  
     plt.savefig(f'{exp_path}/all_losses.png')
 
-    make_record_df(records, folds, exp_path)    
+    df = make_record_df(records, folds_to_train, exp_path)    
     return df
 
 
@@ -105,10 +108,10 @@ def train_CNN(model, scheduler, optimizer, device,
                 count += 1
         test_loss.append(loss_all / count)
         ########################################## test_metrics_plots ##################################
-        record = CNN_Info(model, test_loader, regime = "test", show = False)
+        record = Model_Info(model, test_loader, regime = "test", show = False, mode = 'CNN')
         for name in record.keys():
             metrics[name].append(record[name])
-        #######################################################################################################
+        ################################################################################################
         model.train()
         scheduler.step()
         
@@ -121,7 +124,7 @@ def train_CNN(model, scheduler, optimizer, device,
     ############################################## visualize ##############################################
     
     loss_plot(train_loss, test_loss, path = f'{exp_path}/Plots/loss_plots.png', show = show)
-    record = CNN_Info(model, test_loader, regime = "test",
+    record = Model_Info(model, test_loader, regime = "test", mode = 'CNN',
                       path = f'{exp_path}/Plots/record.png', show = show)
     metrics_plots(metrics, path = f'{exp_path}/Plots/test_metrics_plots.png', show = show)
     
@@ -132,14 +135,13 @@ def train_CNN(model, scheduler, optimizer, device,
         
     return train_loss, test_loss, metrics, record   
 
-#path_begin = "/home/leonov/Baikal/Gr_big_data/exps/Graph",
+
 def train_GNN(model: torch.nn.Module, optimizer, device, 
                          train_loader, test_loader, val_loader,
                          criterion = F.mse_loss,                         
                          exp_path = None, 
                          pretrained_folder = None,
-                         show = True, 
-                         epochs = 20):
+                         show = True, epochs = 20):
     
     train_loss, test_loss, val_loss = [], [], []
     metrics = {name: [] for name in ['polar_res', 'polar_r2', 'azimut_res', 'direction_res']}
@@ -158,8 +160,9 @@ def train_GNN(model: torch.nn.Module, optimizer, device,
 
         for data in train_loader:
             data = data.to(device)
+            outp = model(data)
             optimizer.zero_grad()
-            loss = criterion(model(data), data.y_polar) #l1_loss
+            loss = criterion(outp, data.y_polar) #l2_loss
             loss.backward()
             loss_all += loss.item() #* data.num_graphs
             optimizer.step()
@@ -171,13 +174,17 @@ def train_GNN(model: torch.nn.Module, optimizer, device,
     def test(loader, loss_list):
         model.eval()
         error = 0
-
-        for data in loader:
-            data = data.to(device)
-            error += criterion(model(data), data.y_polar).item() #* data.num_graphs
-            
+        with torch.no_grad():
+            for data in loader:
+                data = data.to(device)
+                outp = model(data)
+                error += criterion(outp, data.y_polar).item() #* data.num_graphs          
         error /= len(loader)
         loss_list.append(error)
+        
+        record = Model_Info(model, loader, regime = "test", show = False, mode = 'GNN')
+        for name in record.keys():
+            metrics[name].append(record[name])
         return error
 
 
@@ -185,10 +192,7 @@ def train_GNN(model: torch.nn.Module, optimizer, device,
     for epoch in tqdm(range(1, epochs + 1)):
         lr = scheduler.optimizer.param_groups[0]['lr']
         train_error = train()
-        test_error = test(test_loader, test_loss)
-        # TO DO: inference
-        
-        # TO DO: inference
+        test_error = test(test_loader, test_loss)        
         scheduler.step(test_error)
         
         if best_val_error is None or val_error <= best_val_error:
@@ -203,20 +207,10 @@ def train_GNN(model: torch.nn.Module, optimizer, device,
         make_fold_structure(exp_path)
         save_states(model, optimizer, exp_path)
     
+    ############################################## visualize ##############################################
     
-    plt.figure(figsize=(9,6))
-    plt.plot(train_loss, label='train', linewidth=2)
-    plt.plot(test_loss, label='test', linewidth=2)
-    plt.plot(val_loss, label='val', linewidth=2)
-    
-    plt.title('Loss_plot'); plt.xlabel('Epochs'); plt.ylabel('Loss')
-    plt.legend()
-    
-    plt.savefig(f'{exp_path}/Plots/loss.png' )
-    plt.show() 
-    
-    '''
-    record = GNN_Info(model, test_loader, regime = "test",
+    loss_plot(train_loss, test_loss, path = f'{exp_path}/Plots/loss_plots.png', show = show)
+    record = Model_Info(model, test_loader, regime = "test", mode = 'GNN',
                       path = f'{exp_path}/Plots/record.png', show = show)
     metrics_plots(metrics, path = f'{exp_path}/Plots/test_metrics_plots.png', show = show)
     
@@ -224,10 +218,8 @@ def train_GNN(model: torch.nn.Module, optimizer, device,
     np.save(f'{exp_path}/Plots/test_loss', test_loss)
     np.save(f'{exp_path}/Plots/metrics', metrics)
     np.save(f'{exp_path}/Plots/record', record)
-    '''
-    return train_loss, test_loss, val_loss
-
-
+        
+    return train_loss, test_loss, metrics, record    
 
 ##############################################################################################################
 '''

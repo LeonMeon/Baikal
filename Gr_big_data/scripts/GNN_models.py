@@ -1,8 +1,39 @@
 import torch
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
+from torch_geometric.nn.models import GCN, MLP
 from torch_geometric.nn import global_mean_pool
 #import torch_geometric.nn as geom_nn
+
+class GNN(torch.nn.Module):
+    def __init__(self, graph_model = GCN, agg = global_mean_pool,
+                 in_channels = 5, out_channels= 2,
+                 hidden_channels = 32, mlp_channels = [32,32], 
+                 num_layers = 2, # num_layers (int) – Number of message passing layers
+                 dropout = 0.1,
+                 act = 'PReLU', norm = 'BatchNorm',
+                 act_first = False, jk = None):
+            
+        self.graph_model = graph_model(
+             in_channels = in_channels, out_channels= mlp_channels[0],
+             hidden_channels = hidden_channels, 
+             num_layers = num_layers, # num_layers (int) – Number of message passing layers
+             dropout = dropout,
+             act = act, norm = norm,
+             act_first = act_first, jk = jk)
+        
+        self.agg = agg
+        self.mlp = MLP(channel_list = mlp_channels + [out_channels],
+                      act = act , act_first = act_first, norm = norm,
+                      bias = False)
+        
+    def forward(self, data):
+        x = self.graph_model(data.x, data.edge_index)        
+        x = self.agg(x, data.batch) 
+        x = self.mlp(x)
+        return x
+
+
 
 class GCN_easy(torch.nn.Module):
     def __init__(self, dataset, activation = torch.nn.PReLU,

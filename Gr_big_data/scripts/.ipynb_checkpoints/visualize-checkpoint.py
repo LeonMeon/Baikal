@@ -1,20 +1,21 @@
 import torch
 from tqdm import tqdm
 import numpy as np
-
+import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 from torch.nn.functional import cosine_similarity, normalize
+from torch_geometric.nn import global_mean_pool
 
 LEGEND_SIZE = 20
-TITLE_SIZE = 30
+TITLE_SIZE = 25
 LABEL_SIZE = 20
 TICKS_SIZE = 20
 
 plt.rcParams.update({'font.size': 20})
 METRICS = ['polar_res', 'polar_r2', 'azimut_res', 'direction_res']
  
-###########################################################                       ###########################################################
+#################################    outp_to_res_and_angles       ####################
 def outp_to_res_and_angles(predict, true): 
     v_pred = normalize(predict.detach()) # нормализую    
     p_true = torch.acos(true[:,-1]) * 180 / np.pi  
@@ -39,16 +40,16 @@ def outp_to_res_and_angles(predict, true):
     else:
         raise Exception("Strange output, it should be 2 or 3 dim vector")
 
-##############################################   loss_plot    #######################################################
+#########################   loss_plot    ############################
 
 def loss_plot(train_loss, test_loss, path = None, show = True ):
     plt.figure(figsize=(9,6))
     plt.plot(np.arange(len(test_loss)), test_loss, label='test', linewidth=2)
     plt.plot(np.arange(len(train_loss)), train_loss, label='train', linewidth=2)
     
-    plt.title('Loss_plot', fontsize = 25)
-    plt.xlabel('Epochs', fontsize = 20)
-    plt.ylabel('Loss', fontsize = 20)
+    plt.title('Loss_plot', fontsize = TITLE_SIZE)
+    plt.xlabel('Epochs', fontsize = LABEL_SIZE)
+    plt.ylabel('Loss', fontsize = LABEL_SIZE)
     plt.legend(fontsize = LEGEND_SIZE)
     
     plt.savefig(path)   
@@ -57,26 +58,26 @@ def loss_plot(train_loss, test_loss, path = None, show = True ):
     else:
         plt.show() 
 
-#################################################   resolution_hist  ##############################################
+###########################   resolution_hist  ########################
 
 def resolution_hist(resolution, x_min = 0.0, x_max = 15, title = ''):
     title = title.title()
     med, sigm2 = np.quantile(resolution, q = 0.5), np.quantile(resolution, q = 0.68)
  
     hist = plt.hist(resolution, bins = 300, histtype= 'step', density = True)   
-    height = hist[0][0]    
-    plt.bar(med, height, width=0.5, align='center', color = "red",
+    height = max(hist[0]) #[0]    
+    plt.bar(med, height, width = x_max /60, align='center', color = "red",
             label = f'{title} angle median Resolution is {round(med, 2)}')   
-    plt.bar(sigm2, height, width=0.5, align='center', color = "orange",
+    plt.bar(sigm2, height, width = x_max /60, align='center', color = "orange",
             label = f'{title} angle 68% Resolution is {round(sigm2, 2)}')
     
-    plt.xlabel(f"Resolution", fontsize= 25)
+    plt.xlabel(f"Resolution", fontsize= LABEL_SIZE)
     plt.xlim(left = x_min, right=x_max) 
-    plt.title(f"{title} Resolution Distribution", fontsize= 30)
+    plt.title(f"{title} Resolution Distribution", fontsize= TITLE_SIZE)
     plt.legend(fontsize = LEGEND_SIZE)   
     return med
 
-####################################################  angle_hist   ################################################# 
+###################################  angle_hist   ############################## 
 
 def angle_hist(true, predict, title = ''):
     title = title.title()
@@ -84,25 +85,24 @@ def angle_hist(true, predict, title = ''):
              label = f"True {title} Angle Distribution")
     plt.hist(predict, bins = 100, histtype= 'step', density = True,
              label = f"Predicted {title} Angle Distribution")
-    plt.xlabel(f"{title} Angle", fontsize = 25)
-    plt.title(f"{title} Angle Distribution", fontsize = 25)
+    plt.xlabel(f"{title} Angle", fontsize = LABEL_SIZE)
+    plt.title(f"{title} Angle Distribution", fontsize = TITLE_SIZE)
     plt.legend(fontsize = LEGEND_SIZE)
 
-##################################################  scatter_plot     #################################################     
+######################  scatter_plot     ##########################     
     
 def scatter_plot(true, predict, title = '', r2 = None):
     title = title.title()
     plt.scatter(true, predict, s = 0.1)
-    plt.xlabel(f'True {title}', fontsize = 25)
-    plt.ylabel(f'Predicted {title}', fontsize = 25)
-    plt.ylim(0,95)
+    plt.xlabel(f'True {title}', fontsize = LABEL_SIZE)
+    plt.ylabel(f'Predicted {title}', fontsize = LABEL_SIZE)
     if r2 != None:
-        plt.title(f'{title} Scatter Plot \n R2 = {round(r2,3)}', fontsize = 30) 
+        plt.title(f'{title} Scatter Plot \n R2 = {round(r2,3)}', fontsize = TITLE_SIZE) 
         return r2
     else:
-        plt.title(f'{title} Scatter Plot', fontsize = 30)     
+        plt.title(f'{title} Scatter Plot', fontsize = TITLE_SIZE)     
         
-#################################################   record_plots     #################################################
+#############################   record_plots     ################################
 
 def metrics_plots(record, path = None, show = False):
     names = list(record.keys())
@@ -111,9 +111,9 @@ def metrics_plots(record, path = None, show = False):
     for i in range(n):
         plt.subplot(n // 2, 2, i + 1)
         plt.plot(record[names[i]])
-        plt.title(names[i], fontsize = 25)
-        plt.ylabel(names[i], fontsize = 20)
-        plt.xlabel('Epochs', fontsize = 20)
+        plt.title(names[i], fontsize = TITLE_SIZE)
+        plt.ylabel(names[i], fontsize = LABEL_SIZE)
+        plt.xlabel('Epochs', fontsize = LABEL_SIZE)
     plt.legend(fontsize = LEGEND_SIZE)
     
     if path is not None:
@@ -123,7 +123,7 @@ def metrics_plots(record, path = None, show = False):
     else:
         plt.show() 
 
-##################################################    make_record_df    #################################################
+##################################    make_record_df    ###############################
 
 def make_record_df(records, folds, exp_path = None):
     cvs = pd.Series([f'CV{i}' for i in range(folds)])
@@ -136,7 +136,7 @@ def make_record_df(records, folds, exp_path = None):
         df.to_csv(f'{exp_path}/cv_metrics.csv', sep='\t')
     return df   
     
-################################################  metrics_by_angles  ################################################
+###########################  metrics_by_angles  #############################
     
 def metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
                       bin_size = 10, angle = 4, path = None, show = False):
@@ -179,13 +179,13 @@ def metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
 
             plt.plot(bins, plot[k]['med'], label = 'med', color = 'blue')
             plt.plot(bins, plot[k]['sigm2'], label = 'sigm2', color = 'orange')
-
+            _title = f"{k} \n med:{[round(v,2) for v in plot[k]['med']]}\n res68%:{[round(v,2) for v in plot[k]['sigm2']]}"
             plt.legend(fontsize = LEGEND_SIZE)
-            plt.title(f"{k} ", fontsize = TITLE_SIZE) #\n {[round(v,2) for v in plot[k]['med'] ]}
+            plt.title(_title, fontsize = 18) #\n {[round(v,2) for v in plot[k]['med'] ]}
             plt.xlabel('Angle bins', fontsize = LABEL_SIZE)
             plt.ylabel('Resolutions', fontsize = LABEL_SIZE)
             plt.xticks(np.arange(0,95,5), fontsize = TICKS_SIZE)
-            
+            plt.grid()
     if path != None:
         plt.savefig(path)  
     if not show:
@@ -193,7 +193,7 @@ def metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
     else:
         plt.show()      
     
-#################################################   CNN_Info     ###################################################
+###############################   Model_Info     #####################################
 ## TODO: make smth in case of prediction of azimut
 def Model_Info(model, loader, regime = "test", path = None, show = True, bin_size = 10, mode = 'CNN'):
     record = {}
@@ -203,9 +203,8 @@ def Model_Info(model, loader, regime = "test", path = None, show = True, bin_siz
     pol_res_list, az_res_list = torch.tensor([]), torch.tensor([])
     resolution_list = torch.tensor([])
     
-    with torch.no_grad():
-        ################################ CNN ###############################
-        if mode == 'CNN':
+    with torch.no_grad():       
+        if mode == 'CNN': ############# CNN ###############################
             for x_batch, y_batch in loader:
                 predict = model(x_batch.to(_device).float()).detach().cpu()
                 
@@ -226,19 +225,18 @@ def Model_Info(model, loader, regime = "test", path = None, show = True, bin_siz
                     az_res_list = torch.cat((az_res_list, az_res), axis = 0)  
                     az_true_list = torch.cat((az_true_list, az_true), axis = 0)
                     az_pred_list = torch.cat((az_pred_list, az_predict), axis = 0)
-                    resolution_list = torch.cat((resolution_list, resolution), axis = 0)
-                    
-        ################################ GNN ###############################            
-        elif mode == 'GNN':
+                    resolution_list = torch.cat((resolution_list, resolution), axis = 0)           
+        elif mode == 'GNN': ############# GNN ###############################
             for data in loader:
-                predict = model(data.to(_device).float()).detach().cpu()
+                data = data.to(_device)
+                outp = model(data).detach().cpu()  
                 
-                if predict.shape[1] == 2:
+                if outp.shape[1] == 2:
                     y_batch = data.y_polar.squeeze().cpu() # data.y_azimut.squeeze().cpu()                       
-                elif predict.shape[1] == 3:
+                elif outp.shape[1] == 3:
                     y_batch = data.direction.squeeze().cpu()
                     
-                resolution, angles = outp_to_res_and_angles(predict, y_batch) 
+                resolution, angles = outp_to_res_and_angles(outp, y_batch) 
 
                 p_predict, p_true = angles[0].squeeze(), angles[1].squeeze()
                 p_res = (p_predict - p_true).abs()
@@ -255,21 +253,17 @@ def Model_Info(model, loader, regime = "test", path = None, show = True, bin_siz
                     az_res_list = torch.cat((az_res_list, az_res), axis = 0)  
                     az_true_list = torch.cat((az_true_list, az_true), axis = 0)
                     az_pred_list = torch.cat((az_pred_list, az_predict), axis = 0)
-                    resolution_list = torch.cat((resolution_list, resolution), axis = 0)
-                    
+                    resolution_list = torch.cat((resolution_list, resolution), axis = 0)                    
         else:
             print("Emmmm.... What?")
-
         
     resolution_list = resolution_list.numpy()
     pol_res_list, az_res_list = pol_res_list.numpy(), az_res_list.numpy()   
     az_true_list, az_pred_list = az_true_list.numpy(), az_pred_list.numpy()      
     pol_true_list, pol_pred_list = pol_true_list.numpy(), pol_pred_list.numpy()
-
     # drawing
     rows = 1 if az_pred_list.shape[0] == 0 else 3   
-    plt.figure(figsize = (24, 8*rows))
-    
+    plt.figure(figsize = (24, 8 * rows))   
     # polar  resolution
     plt.subplot(rows, 3, 1)
     polar_med = resolution_hist(resolution = pol_res_list, title = f'{regime} polar', x_max = 15)
@@ -298,10 +292,10 @@ def Model_Info(model, loader, regime = "test", path = None, show = True, bin_siz
         plt.subplot(rows, 3, 8)
         direction_res = resolution_hist(resolution = resolution_list, title = f'{regime} direction', x_max = 15)
         record['direction_res'] = direction_res
-    
+    ############         Metrics for  certain polar angle values   ###################
     metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
                       bin_size = bin_size, angle = rows + 1, path = path, show = show)        
-        
+    ##################################################################################    
     if path != None:
         plt.savefig(path)
     if not show:
