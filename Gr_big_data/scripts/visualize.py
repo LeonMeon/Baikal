@@ -67,9 +67,9 @@ def resolution_hist(resolution, x_min = 0.0, x_max = 15, title = ''):
     hist = plt.hist(resolution, bins = 300, histtype= 'step', density = True)   
     height = max(hist[0]) #[0]    
     plt.bar(med, height, width = x_max /60, align='center', color = "red",
-            label = f'{title} angle median Resolution is {round(med, 2)}')   
+            label = f'Res_50% = {round(med, 2)}')   
     plt.bar(sigm2, height, width = x_max /60, align='center', color = "orange",
-            label = f'{title} angle 68% Resolution is {round(sigm2, 2)}')
+            label = f'Res_68% = {round(sigm2, 2)}')
     
     plt.xlabel(f"Resolution", fontsize= LABEL_SIZE)
     plt.xlim(left = x_min, right=x_max) 
@@ -82,9 +82,9 @@ def resolution_hist(resolution, x_min = 0.0, x_max = 15, title = ''):
 def angle_hist(true, predict, title = ''):
     title = title.title()
     plt.hist(true, bins = 100, alpha = 0.2, density = True,
-             label = f"True {title} Angle Distribution")
+             label = f"True {title}")
     plt.hist(predict, bins = 100, histtype= 'step', density = True,
-             label = f"Predicted {title} Angle Distribution")
+             label = f"Predicted {title}")
     plt.xlabel(f"{title} Angle", fontsize = LABEL_SIZE)
     plt.title(f"{title} Angle Distribution", fontsize = TITLE_SIZE)
     plt.legend(fontsize = LEGEND_SIZE)
@@ -153,7 +153,7 @@ def metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
             plot['med'].append(  np.quantile(pol_res, q = 0.5 ))
             plot['sigm2'].append(np.quantile(pol_res, q = 0.68)) 
 
-        plt.figure(figsize = (12,12))
+        plt.figure(figsize = (16,7))
 
         plt.plot(bins, plot['med'], label = 'med', color = 'blue')
         plt.plot(bins, plot['sigm2'], label = 'sigm2', color = 'orange')
@@ -195,7 +195,9 @@ def metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
     
 ###############################   Model_Info     #####################################
 ## TODO: make smth in case of prediction of azimut
-def Model_Info(model, loader, regime = "test", path = None, show = True, bin_size = 10, mode = 'CNN'):
+def Model_Info(model, loader, regime = "test",
+               path_record = None, path_m_by_angle = None,
+               show = True, bin_size = 10, mode = 'CNN'):
     record = {}
     _device = next(model.parameters()).device
     pol_pred_list, pol_true_list = torch.tensor([]), torch.tensor([]), 
@@ -292,12 +294,13 @@ def Model_Info(model, loader, regime = "test", path = None, show = True, bin_siz
         plt.subplot(rows, 3, 8)
         direction_res = resolution_hist(resolution = resolution_list, title = f'{regime} direction', x_max = 15)
         record['direction_res'] = direction_res
+        
+    if path_record != None:
+        plt.savefig(path_record)
     ############         Metrics for  certain polar angle values   ###################
     metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
-                      bin_size = bin_size, angle = rows + 1, path = path, show = show)        
+                      bin_size = bin_size, angle = rows + 1, path = path_m_by_angle, show = show)        
     ##################################################################################    
-    if path != None:
-        plt.savefig(path)
     if not show:
         plt.close()
     else:

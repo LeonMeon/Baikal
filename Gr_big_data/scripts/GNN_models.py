@@ -3,7 +3,14 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
 from torch_geometric.nn.models import GCN, MLP
 from torch_geometric.nn import global_mean_pool
-#import torch_geometric.nn as geom_nn
+
+
+# jk: "last", "cat", "max", "lstm"
+# norm: 'BatchNorm', 'GraphNorm', 'MeanSubtractionNorm', 'MessageNorm', 'GraphSizeNorm', 'DiffGroupNorm', 'LayerNorm', 'InstanceNorm', 'PairNorm'}
+# act '{'Tanh', 'Mish', 'Softmax2d', 'Hardtanh', 'Sigmoid', 'Softmin', 'Softshrink',
+#'Hardsigmoid', 'RReLU', 'Hardswish', 'ReLU6', 'LogSoftmax', 'ReLU', 'SELU', 'Threshold', 
+#'CELU', 'swish', 'Module', 'LeakyReLU', 'Tanhshrink', 'Softmax', 'MultiheadAttention', 
+#'GELU', 'NonDynamicallyQuantizableLinear', 'ELU', 'GLU', 'PReLU', 'Softplus', 'LogSigmoid', 'Softsign', 'Hardshrink', 'SiLU'}
 
 class GNN(torch.nn.Module):
     def __init__(self, graph_model = GCN, agg = global_mean_pool,
@@ -13,7 +20,7 @@ class GNN(torch.nn.Module):
                  dropout = 0.1,
                  act = 'PReLU', norm = 'BatchNorm',
                  act_first = False, jk = None):
-            
+        super().__init__()   
         self.graph_model = graph_model(
              in_channels = in_channels, out_channels= mlp_channels[0],
              hidden_channels = hidden_channels, 

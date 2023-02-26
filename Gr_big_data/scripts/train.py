@@ -71,7 +71,8 @@ def cross_val_CNN(model, device, train_loader, #test_loader,
     return df
 
 
-def train_CNN(model, scheduler, optimizer, device,
+def train_CNN(model, # scheduler
+            optimizer, device,
             train_loader, test_loader,
             epochs_num = 40, criterion=torch.nn.L1Loss(),
             pretrained_folder = None, exp_path = None,
@@ -83,11 +84,14 @@ def train_CNN(model, scheduler, optimizer, device,
     if pretrained_folder is not None:
         model.load_state_dict(torch.load(f'{pretrained_folder}/States/model.pth'))
         optimizer.load_state_dict(torch.load(f'{pretrained_folder}/States/opt.pth'))
-            
-    for n in tqdm(range(1, epochs_num+1)):   
+
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
+                                                           factor=0.7, patience=5,
+                                                           min_lr=0.00001)        
+    
+    def train():
         model.train()
         loss_all, count = 0, 0
-        
         for x_batch, y_batch in train_loader:
             optimizer.zero_grad()
             outp = model(x_batch.to(device).float())
@@ -95,10 +99,12 @@ def train_CNN(model, scheduler, optimizer, device,
             loss.backward()
             optimizer.step()
             loss_all += loss.item() 
-            count += 1            
-        train_loss.append(loss_all / count)
-        
-        ############################################## inference ###########################################        
+            count += 1  
+        train_error = loss_all / count
+        train_loss.append(train_error) 
+        return train_error
+    
+    def test(): # loader, loss_list
         model.eval()        
         loss_all, count = 0, 0        
         with torch.no_grad():
@@ -106,15 +112,22 @@ def train_CNN(model, scheduler, optimizer, device,
                 outp = model(x_test_batch.to(device).float())
                 loss_all +=  criterion(outp, y_test_batch.to(device).float()).item()
                 count += 1
-        test_loss.append(loss_all / count)
-        ########################################## test_metrics_plots ##################################
+        test_error = loss_all / count
+        test_loss.append(test_error)
+        return test_error
+    
+    def metrics_info():
         record = Model_Info(model, test_loader, regime = "test", show = False, mode = 'CNN')
         for name in record.keys():
             metrics[name].append(record[name])
-        ################################################################################################
-        model.train()
-        scheduler.step()
-        
+
+            
+    for n in tqdm(range(1, epochs_num+1)):  
+        lr = scheduler.optimizer.param_groups[0]['lr']
+        train_error = train()
+        test_error = test()
+        metrics_info()
+        scheduler.step(test_error)      
     model.eval()
     
     if exp_path is not None:
@@ -181,28 +194,27 @@ def train_GNN(model: torch.nn.Module, optimizer, device,
                 error += criterion(outp, data.y_polar).item() #* data.num_graphs          
         error /= len(loader)
         loss_list.append(error)
-        
-        record = Model_Info(model, loader, regime = "test", show = False, mode = 'GNN')
-        for name in record.keys():
-            metrics[name].append(record[name])
         return error
 
 
-    best_val_error = None
+    #best_val_error = None
     for epoch in tqdm(range(1, epochs + 1)):
         lr = scheduler.optimizer.param_groups[0]['lr']
         train_error = train()
-        test_error = test(test_loader, test_loss)        
-        scheduler.step(test_error)
-        
-        if best_val_error is None or val_error <= best_val_error:
-            val_error = test(val_loader,val_loss)
-            best_val_error = val_error
-        
-        
+        test_error = test(test_loader, test_loss) 
+        record = Model_Info(model, test_loader, regime = "test", show = False, mode = 'GNN')
+        for name in record.keys():
+            metrics[name].append(record[name])        
+        scheduler.step(test_error)       
+        #if best_val_error is None or val_error <= best_val_error:
+        #    val_error = test(val_loader,val_loss)
+        #    best_val_error = val_error       
+        '''
         print(f'Epoch: {epoch:03d}, LR: {lr:7f}, Train Loss: {train_error:.7f}, '
-              f'Val Loss: {val_error:.7f}, Test Loss: {test_error:.7f}')
-        
+              f' Test Loss: {test_error:.7f}')
+              #      f'Val Loss: {val_error:.7f}, Test Loss: {test_error:.7f}')
+        '''
+                
     if exp_path is not None:
         make_fold_structure(exp_path)
         save_states(model, optimizer, exp_path)
