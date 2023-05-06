@@ -1,13 +1,17 @@
 import copy
+from PIL import Image
 import torch
 import torch.nn.functional as F
+from torchvision.transforms import ToTensor
 from torch.utils.data import ConcatDataset, TensorDataset, DataLoader
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from os import mkdir, makedirs
 from visualize import *
-from torch_geometric.nn import global_mean_pool
+from torch.utils.tensorboard import SummaryWriter
+
+#from datetime import datetime
 
 def make_fold_structure(exp_path):
     makedirs(exp_path,exist_ok=True)
@@ -44,7 +48,7 @@ def cross_val_CNN(model, device, train_loader, #test_loader,
         optimizer_CV = torch.optim.Adam(model_CV.parameters(), lr = learn_rate)
         scheduler_CV = torch.optim.lr_scheduler.ExponentialLR(optimizer_CV, gamma = 0.95)
                 
-        train_loss, test_loss, metrics, record = train_CNN(model_CV, scheduler_CV, optimizer_CV, device, 
+        record = train_CNN(model_CV, scheduler_CV, optimizer_CV, device, 
                                                           train_loader, val_loader,
                                                           epochs_num = epochs_num, criterion = criterion,
                                                           exp_path = f'{exp_path}/CV{i}')
@@ -77,13 +81,10 @@ def train_CNN(model, # scheduler
             epochs_num = 40, criterion=torch.nn.L1Loss(),
             pretrained_folder = None, exp_path = None,
             show = False):
-        
-    train_loss, test_loss = [], []
-    metrics = {name: [] for name in ['polar_res', 'polar_r2', 'azimut_res', 'direction_res']}
 
     if pretrained_folder is not None:
-        model.load_state_dict(torch.load(f'{pretrained_folder}/States/model.pth'))
-        optimizer.load_state_dict(torch.load(f'{pretrained_folder}/States/opt.pth'))
+        model.load_state_dict(torch.load(f'{pretrained_folder}/States/model'))
+        optimizer.load_state_dict(torch.load(f'{pretrained_folder}/States/opt'))
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
                                                            factor=0.7, patience=5,
@@ -95,13 +96,12 @@ def train_CNN(model, # scheduler
         for x_batch, y_batch in train_loader:
             optimizer.zero_grad()
             outp = model(x_batch.to(device).float())
-            loss = criterion(outp,y_batch.to(device).float())
+            loss = criterion(outp, y_batch.to(device).float())
             loss.backward()
             optimizer.step()
             loss_all += loss.item() 
             count += 1  
         train_error = loss_all / count
-        train_loss.append(train_error) 
         return train_error
     
     def test(): # loader, loss_list
@@ -113,21 +113,28 @@ def train_CNN(model, # scheduler
                 loss_all +=  criterion(outp, y_test_batch.to(device).float()).item()
                 count += 1
         test_error = loss_all / count
-        test_loss.append(test_error)
         return test_error
-    
-    def metrics_info():
-        record = Model_Info(model, test_loader, regime = "test", show = False, mode = 'CNN')
-        for name in record.keys():
-            metrics[name].append(record[name])
 
-            
-    for n in tqdm(range(1, epochs_num+1)):  
+    logdir = exp_path + "/logs"
+    writer = SummaryWriter(logdir)    
+    
+    for epoch in tqdm(range(1, epochs_num+1)):  
         lr = scheduler.optimizer.param_groups[0]['lr']
         train_error = train()
-        test_error = test()
-        metrics_info()
-        scheduler.step(test_error)      
+        test_error = test()    
+        record = Model_Info(model, test_loader,
+                           regime = "test",  mode = 'CNN',
+                           path_record = None, path_m_by_angle = None,
+                           show_distr_by_polar_angle = False, show = False)           
+        
+        writer.add_scalar('Learning Rate', lr, epoch)
+        writer.add_scalar('Loss/train', train_error, epoch)
+        writer.add_scalar('Loss/test', test_error, epoch)
+        for metric_name, metric in record.items():
+            writer.add_scalar(f'Metrics/test/{metric_name}', metric, epoch)        
+        
+        scheduler.step(test_error)
+        
     model.eval()
     
     if exp_path is not None:
@@ -135,33 +142,29 @@ def train_CNN(model, # scheduler
         save_states(model = model, optimizer = optimizer, exp_path = exp_path)
     
     ############################################## visualize ##############################################
+    record = Model_Info(model, test_loader, regime = "test", mode = 'CNN', 
+                       show_distr_by_polar_angle = True, show = show,
+                       path_record = f'{exp_path}/Plots/record.png',
+                       path_m_by_angle = f'{exp_path}/Plots/metrics_by_angle.png')
     
-    loss_plot(train_loss, test_loss, path = f'{exp_path}/Plots/loss_plots.png', show = show)
-    record = Model_Info(model, test_loader, regime = "test", mode = 'CNN',
-                      path = f'{exp_path}/Plots/record.png', show = show)
-    metrics_plots(metrics, path = f'{exp_path}/Plots/test_metrics_plots.png', show = show)
+    record_img = Image.open(f'{exp_path}/Plots/record.png')
+    metrics_by_angle = Image.open(f'{exp_path}/Plots/metrics_by_angle.png')
+    record_img, metrics_by_angle = ToTensor()(record_img), ToTensor()(metrics_by_angle)
+    writer.add_image('Record_Image', record_img, global_step=0)
+    writer.add_image('Metrics_by_Angle', metrics_by_angle, global_step=0) 
     
-    np.save(f'{exp_path}/Plots/train_loss', train_loss)
-    np.save(f'{exp_path}/Plots/test_loss', test_loss)
-    np.save(f'{exp_path}/Plots/metrics', metrics)
-    np.save(f'{exp_path}/Plots/record', record)
-        
-    return train_loss, test_loss, metrics, record   
-
+    return record
 
 def train_GNN(model: torch.nn.Module, optimizer, device, 
                          train_loader, test_loader, val_loader,
-                         criterion = F.mse_loss,                         
-                         exp_path = None, 
+                         criterion = F.mse_loss,                        
+                         exp_path = None, #target_name = 'y_polar',
                          pretrained_folder = None,
                          show = True, epochs = 20):
     
-    train_loss, test_loss, val_loss = [], [], []
-    metrics = {name: [] for name in ['polar_res', 'polar_r2', 'azimut_res', 'direction_res']}
-    
     if pretrained_folder is not None:
-        model.load_state_dict(torch.load(f'{pretrained_folder}/model.pth'))
-        optimizer.load_state_dict(torch.load(f'{pretrained_folder}/opt.pth'))
+        model.load_state_dict(torch.load(f'{pretrained_folder}/States/model'))
+        optimizer.load_state_dict(torch.load(f'{pretrained_folder}/States/opt'))
           
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
                                                            factor=0.7, patience=5,
@@ -173,66 +176,68 @@ def train_GNN(model: torch.nn.Module, optimizer, device,
 
         for data in train_loader:
             data = data.to(device)
-            outp = model(data)
+            outp = model(data)          
+            y = data.y_polar if outp.shape[-1] == 2 else data.direction
             optimizer.zero_grad()
-            loss = criterion(outp, data.y_polar) #l2_loss
+            loss = criterion(outp, y) 
             loss.backward()
-            loss_all += loss.item() #* data.num_graphs
+            loss_all += loss.item() # * data.num_graphs
             optimizer.step()
             
         loss_all /= len(train_loader)
-        train_loss.append(loss_all)
         return loss_all 
 
-    def test(loader, loss_list):
+    def test(loader):
         model.eval()
         error = 0
         with torch.no_grad():
             for data in loader:
                 data = data.to(device)
-                outp = model(data)
-                error += criterion(outp, data.y_polar).item() #* data.num_graphs          
+                outp = model(data)    
+                y = data.y_polar if outp.shape[-1] == 2 else data.direction
+                error += criterion(outp, y).item() # * data.num_graphs          
         error /= len(loader)
-        loss_list.append(error)
         return error
 
-
-    #best_val_error = None
+    logdir = exp_path + "/logs"  
+    writer = SummaryWriter(logdir)
+    
     for epoch in tqdm(range(1, epochs + 1)):
-        lr = scheduler.optimizer.param_groups[0]['lr']
-        train_error = train()
-        test_error = test(test_loader, test_loss) 
-        record = Model_Info(model, test_loader, regime = "test", show = False, mode = 'GNN')
-        for name in record.keys():
-            metrics[name].append(record[name])        
+        lr = scheduler.optimizer.param_groups[0]['lr']       
+        train_error = train()       
+        test_error = test(test_loader)
+        record = Model_Info(model, test_loader,
+                           regime = "test",  mode = 'GNN',
+                           path_record = None, path_m_by_angle = None,
+                           show_distr_by_polar_angle = False, show = False)
+        
+        
+        writer.add_scalar('Learning Rate', lr, epoch)
+        writer.add_scalar('Loss/train', train_error, epoch)
+        writer.add_scalar('Loss/test', test_error, epoch)
+        for metric_name, metric in record.items():
+            writer.add_scalar(f'Metrics/test/{metric_name}', metric, epoch)
+              
         scheduler.step(test_error)       
-        #if best_val_error is None or val_error <= best_val_error:
-        #    val_error = test(val_loader,val_loss)
-        #    best_val_error = val_error       
-        '''
-        print(f'Epoch: {epoch:03d}, LR: {lr:7f}, Train Loss: {train_error:.7f}, '
-              f' Test Loss: {test_error:.7f}')
-              #      f'Val Loss: {val_error:.7f}, Test Loss: {test_error:.7f}')
-        '''
-                
+               
     if exp_path is not None:
         make_fold_structure(exp_path)
         save_states(model, optimizer, exp_path)
-    
-    ############################################## visualize ##############################################
-    
-    loss_plot(train_loss, test_loss, path = f'{exp_path}/Plots/loss_plots.png', show = show)
-    record = Model_Info(model, test_loader, regime = "test", mode = 'GNN',
-                      path = f'{exp_path}/Plots/record.png', show = show)
-    metrics_plots(metrics, path = f'{exp_path}/Plots/test_metrics_plots.png', show = show)
-    
-    np.save(f'{exp_path}/Plots/train_loss', train_loss)
-    np.save(f'{exp_path}/Plots/test_loss', test_loss)
-    np.save(f'{exp_path}/Plots/metrics', metrics)
-    np.save(f'{exp_path}/Plots/record', record)
         
-    return train_loss, test_loss, metrics, record    
-
+    ############################################## visualize ##############################################
+    record = Model_Info(model, test_loader, regime = "test", mode = 'GNN', 
+                       show_distr_by_polar_angle = True, show = show,
+                       path_record = f'{exp_path}/Plots/record.png',
+                       path_m_by_angle = f'{exp_path}/Plots/metrics_by_angle.png')
+    
+    record_img = Image.open(f'{exp_path}/Plots/record.png')
+    metrics_by_angle = Image.open(f'{exp_path}/Plots/metrics_by_angle.png')
+    record_img, metrics_by_angle = ToTensor()(record_img), ToTensor()(metrics_by_angle)
+    writer.add_image('Record_Image', record_img, global_step=0)
+    writer.add_image('Metrics_by_Angle', metrics_by_angle, global_step=0) 
+    
+    writer.close()  
+    return record
 ##############################################################################################################
 '''
 def fit_E(model, scheduler_Exp, optimizer, device,

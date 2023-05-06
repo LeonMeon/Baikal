@@ -15,14 +15,17 @@ from torch_geometric.nn import global_mean_pool
 class GNN(torch.nn.Module):
     def __init__(self, graph_model = GCN, agg = global_mean_pool,
                  in_channels = 5, out_channels= 2,
-                 hidden_channels = 32, mlp_channels = [32,32], 
+                 hidden_channels = 32,
+                 mlp_channel_size = 32 , mlp_channels_n = 2,                 
                  num_layers = 2, # num_layers (int) – Number of message passing layers
                  dropout = 0.1,
                  act = 'PReLU', norm = 'BatchNorm',
-                 act_first = False, jk = None):
+                 act_first = False, jk = None, **kwargs):
         super().__init__()   
+        # [hid] +k*[32],
+        self.mlp_channels = [hidden_channels] + int(mlp_channels_n) *[ int(mlp_channel_size)]
         self.graph_model = graph_model(
-             in_channels = in_channels, out_channels= mlp_channels[0],
+             in_channels = in_channels, out_channels= self.mlp_channels[0],
              hidden_channels = hidden_channels, 
              num_layers = num_layers, # num_layers (int) – Number of message passing layers
              dropout = dropout,
@@ -30,7 +33,7 @@ class GNN(torch.nn.Module):
              act_first = act_first, jk = jk)
         
         self.agg = agg
-        self.mlp = MLP(channel_list = mlp_channels + [out_channels],
+        self.mlp = MLP(channel_list = self.mlp_channels + [out_channels],
                       act = act , act_first = act_first, norm = norm,
                       bias = False)
         

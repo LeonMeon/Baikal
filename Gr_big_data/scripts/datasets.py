@@ -1,5 +1,5 @@
 import torch
-from torch_geometric.data import InMemoryDataset #, download_url
+from torch_geometric.data import InMemoryDataset, Data #, download_url
 from tqdm import tqdm
 import numpy as np
 import h5py as h5
@@ -69,6 +69,7 @@ class Dataset_Polar_Azimut(InMemoryDataset):
             n_edges = 3* n_nodes - 2
 
             edge_indexes = self.edges[:,:n_edges]
+            #pos = torch.arange(n_nodes).view(-1, 1).float() # for DGCNN
             # t, Q, x,y,z ( not sure about first two order)
             # data as [cases_length, 35,5]
             x = torch.FloatTensor(hf[regime + '/data/'][ind,:n_nodes])
@@ -79,12 +80,12 @@ class Dataset_Polar_Azimut(InMemoryDataset):
             # only azimut
             y_azimut = torch.cat((torch.sin(azimut), torch.cos(azimut)), axis=1)
             # direction vector
-            v_x = np.expand_dims(np.sin(polar) * np.cos(azimut), axis=1)
-            v_y = np.expand_dims(np.sin(polar) * np.sin(azimut), axis=1)
-            v_z = np.expand_dims(np.cos(polar), axis=1)
-            direction = torch.FloatTensor(np.concatenate((v_x, v_y, v_z), axis=1))
+            v_x = torch.sin(polar) * torch.cos(azimut)
+            v_y = torch.sin(polar) * torch.sin(azimut)
+            v_z = torch.cos(polar)
+            direction = torch.cat((v_x, v_y, v_z), axis=1)
 
-        return Data(x = x, edge_index = edge_indexes,
+        return Data(x = x, edge_index = edge_indexes, #pos = pos,
                     polar = polar, azimut = azimut,
                     y_polar = y_polar, y_azimut = y_azimut,
                     direction = direction)  

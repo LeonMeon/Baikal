@@ -1,13 +1,13 @@
 import torch
-import torch.nn
+import torch.nn as nn
 POWER = 4
-
+# nn.InstanceNorm1d nn.GroupNorm nn.LayerNorm
 
 class Start_Block(nn.Module):
-    def __init__(self,input_size ):
+    def __init__(self,input_size, bias = True ):
         super().__init__()
         self.start_block = nn.Sequential(
-            nn.Conv1d(input_size, 5,  kernel_size= 3 , stride = 1 ,padding= 1 ,bias = False),
+            nn.Conv1d(input_size, 5,  kernel_size= 3 , stride = 1 ,padding= 1 ,bias = bias),
             nn.BatchNorm1d(5),
             nn.PReLU()
         )
@@ -16,10 +16,10 @@ class Start_Block(nn.Module):
 
 
 class Conv_Block(nn.Module):
-    def __init__(self,input_size, output_size, ker = 3):
+    def __init__(self,input_size, output_size, ker = 3, bias = True):
         super().__init__()
         self.conv_block = nn.Sequential(
-            nn.Conv1d(input_size, output_size, kernel_size= ker, stride=1, padding=1, bias = False),
+            nn.Conv1d(input_size, output_size, kernel_size= ker, stride=1, padding=1, bias = bias),
             nn.BatchNorm1d(num_features = output_size),
             nn.PReLU()
         )
@@ -28,7 +28,7 @@ class Conv_Block(nn.Module):
     
         
 class Triple_Res_block(nn.Module):
-    def __init__(self,input_size, ker = 3):
+    def __init__(self,input_size, ker = 3, bias = True):
         super().__init__()
         self.module = nn.Sequential(    
         Conv_Block(input_size, input_size * POWER, ker = ker),
@@ -36,7 +36,7 @@ class Triple_Res_block(nn.Module):
         Conv_Block(input_size * POWER, input_size, ker = ker),
           )
         self.conv = nn.Sequential( 
-            nn.Conv1d(input_size, input_size, kernel_size =1,bias =  False), # TODO: bias =  True
+            nn.Conv1d(input_size, input_size, kernel_size =1,bias =  bias), 
             nn.PReLU()
         )
     def forward(self, inputs):

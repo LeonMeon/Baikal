@@ -157,9 +157,10 @@ def metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
 
         plt.plot(bins, plot['med'], label = 'med', color = 'blue')
         plt.plot(bins, plot['sigm2'], label = 'sigm2', color = 'orange')
-
+        print(plot['med'])
+        _title = "Polar"
         plt.legend(fontsize = LEGEND_SIZE)
-        plt.title('Polar', fontsize = TITLE_SIZE)
+        plt.title(_title, fontsize = TITLE_SIZE)
         plt.xlabel('Angle bins', fontsize = LABEL_SIZE)
         plt.ylabel('Resolutions', fontsize = LABEL_SIZE)
         plt.xticks(np.arange(0,95,5), fontsize = TICKS_SIZE)
@@ -181,6 +182,7 @@ def metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
             plt.plot(bins, plot[k]['sigm2'], label = 'sigm2', color = 'orange')
             _title = f"{k} \n med:{[round(v,2) for v in plot[k]['med']]}\n res68%:{[round(v,2) for v in plot[k]['sigm2']]}"
             plt.legend(fontsize = LEGEND_SIZE)
+            print(k, plot[k]['med'])
             plt.title(_title, fontsize = 18) #\n {[round(v,2) for v in plot[k]['med'] ]}
             plt.xlabel('Angle bins', fontsize = LABEL_SIZE)
             plt.ylabel('Resolutions', fontsize = LABEL_SIZE)
@@ -196,8 +198,10 @@ def metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
 ###############################   Model_Info     #####################################
 ## TODO: make smth in case of prediction of azimut
 def Model_Info(model, loader, regime = "test",
+               bin_size = 10, mode = 'CNN',
                path_record = None, path_m_by_angle = None,
-               show = True, bin_size = 10, mode = 'CNN'):
+               show_distr_by_polar_angle = True,show = True
+               ):
     record = {}
     _device = next(model.parameters()).device
     pol_pred_list, pol_true_list = torch.tensor([]), torch.tensor([]), 
@@ -234,7 +238,7 @@ def Model_Info(model, loader, regime = "test",
                 outp = model(data).detach().cpu()  
                 
                 if outp.shape[1] == 2:
-                    y_batch = data.y_polar.squeeze().cpu() # data.y_azimut.squeeze().cpu()                       
+                    y_batch = data.y_polar.squeeze().cpu()                    
                 elif outp.shape[1] == 3:
                     y_batch = data.direction.squeeze().cpu()
                     
@@ -298,14 +302,60 @@ def Model_Info(model, loader, regime = "test",
     if path_record != None:
         plt.savefig(path_record)
     ############         Metrics for  certain polar angle values   ###################
-    metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
-                      bin_size = bin_size, angle = rows + 1, path = path_m_by_angle, show = show)        
+    if show_distr_by_polar_angle:
+        metrics_by_angles(pol_true_list, pol_res_list, az_res_list, resolution_list,
+                          bin_size = bin_size, angle = rows + 1, path = path_m_by_angle, show = show)        
     ##################################################################################    
     if not show:
         plt.close()
     else:
         plt.show()  
     return record
+ 
+    
+###########################################                  test_resolution           ##############    
+def test_err_and_res(model, loader, mode = 'GNN'):
+    error = 0
+    _device = next(model.parameters()).device
+    resolution_list = torch.tensor([])
+    
+    with torch.no_grad():       
+        if mode == 'CNN': ############# CNN ###############################
+            for x_batch, y_batch in loader:
+                predict = model(x_batch.to(_device).float()).detach().cpu()     
+                resolution, angles = outp_to_res_and_angles(predict, y_batch)          
+                error += criterion(outp, y_batch).item() 
+                if len(angles) == 4:           
+                    resolution_list = torch.cat((resolution_list, resolution), axis = 0)
+                    
+                else:
+                    p_predict, p_true = angles[0].squeeze(), angles[1].squeeze()
+                    p_res = (p_predict - p_true).abs()
+                    resolution_list = torch.cat((resolution_list, p_res), axis = 0)  
+                    
+        elif mode == 'GNN': ############# GNN ###############################
+            for data in loader:
+                data = data.to(_device)
+                outp = model(data).detach().cpu()  
+                
+                if outp.shape[1] == 2:
+                    y_batch = data.y_polar.squeeze().cpu()                    
+                elif outp.shape[1] == 3:
+                    y_batch = data.direction.squeeze().cpu()
+                    
+                resolution, angles = outp_to_res_and_angles(outp, y_batch) 
+                error += criterion(outp, y_batch).item()  
+                if len(angles) == 4:           
+                    resolution_list = torch.cat((resolution_list, resolution), axis = 0)  
+                    
+                else:
+                    p_predict, p_true = angles[0].squeeze(), angles[1].squeeze()
+                    p_res = (p_predict - p_true).abs()
+                    resolution_list = torch.cat((resolution_list, p_res), axis = 0)
+        else:
+            print("Emmmm.... What?")
+    res = np.quantile(resolution_list.numpy(), q = 0.5)
+    return res, error / len(loader)
     
 '''
 def GNN_Info(model, loader, regime = "train"):
